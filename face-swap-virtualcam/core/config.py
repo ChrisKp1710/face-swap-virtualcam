@@ -16,7 +16,7 @@ class AppConfig:
     webcam_id: int = 0
     virtual_cam_width: int = 1920
     virtual_cam_height: int = 1080
-    virtual_cam_fps: int = 60
+    virtual_cam_fps: int = 50
     
     # AI Settings
     providers: List[str] = field(default_factory=lambda: ["DmlExecutionProvider", "CPUExecutionProvider"])

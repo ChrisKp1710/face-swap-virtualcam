@@ -53,19 +53,36 @@ class CaptureThread(threading.Thread):
                 self.running = False
                 return
 
-            # Configurazione iper-veloce delle proprietà
-            # IMPORTANTE: Impostiamo MJPG e Risoluzione PRIMA di qualsiasi lettura
-            self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.config.virtual_cam_width)
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.config.virtual_cam_height)
-            self.cap.set(cv2.CAP_PROP_FPS, self.config.virtual_cam_fps)
-            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            # --- SETUP NEL COFANO (Configurazione Hardware) ---
+            logger.info("--- CONFIGURAZIONE HARDWARE IN CORSO ---")
+            
+            # Funzione helper per loggare il risultato di ogni comando
+            def set_and_verify(prop_id, value, name):
+                self.cap.set(prop_id, value)
+                actual = self.cap.get(prop_id)
+                logger.info(f"SET {name}: Richiesto={value} | REALE={actual}")
+                return actual
 
-            # Verifica specifiche reali
+            # 1. Impostiamo MJPG (Cruciale per sbloccare alte risoluzioni/FPS su USB)
+            set_and_verify(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'), "FORMAT (MJPG)")
+            
+            # 2. Risoluzione
+            set_and_verify(cv2.CAP_PROP_FRAME_WIDTH, self.config.virtual_cam_width, "WIDTH")
+            set_and_verify(cv2.CAP_PROP_FRAME_HEIGHT, self.config.virtual_cam_height, "HEIGHT")
+            
+            # 3. Frame Rate
+            set_and_verify(cv2.CAP_PROP_FPS, self.config.virtual_cam_fps, "FPS")
+            
+            # 4. Buffer (Latenza Zero)
+            set_and_verify(cv2.CAP_PROP_BUFFERSIZE, 1, "BUFFER")
+
+            logger.info("--- CONFIGURAZIONE COMPLETATA ---")
+            
+            # Verifica finale
             actual_w = self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)
             actual_h = self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
             actual_fps = self.cap.get(cv2.CAP_PROP_FPS)
-            logger.info(f"WEBCAM LIVE: {actual_w:.0f}x{actual_h:.0f} @ {actual_fps:.0f} FPS")
+            logger.info(f">>> WEBCAM ATTIVA: {actual_w:.0f}x{actual_h:.0f} @ {actual_fps:.0f} FPS <<<")
 
             while self.running:
                 try:

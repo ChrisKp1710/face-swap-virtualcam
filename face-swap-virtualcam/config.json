@@ -8,7 +8,7 @@
     "DmlExecutionProvider",
     "CPUExecutionProvider"
   ],
-  "active_provider": "CPUExecutionProvider",
+  "active_provider": "DmlExecutionProvider",
   "face_enhancement_weight": 0.83,
   "enable_enhancement": true,
   "enable_color_transfer": true,
