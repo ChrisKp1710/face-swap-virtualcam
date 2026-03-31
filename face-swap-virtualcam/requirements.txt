@@ -1,0 +1,12 @@
+# Face Swap Virtual Cam Requirements
+
+onnxruntime-directml>=1.16.0
+https://github.com/Gourieff/Assets/raw/main/Insightface/insightface-0.7.3-cp311-cp311-win_amd64.whl
+opencv-python-headless
+pyvirtualcam
+customtkinter
+mediapipe
+# Pin numpy below 2.0 to avoid compiled C extension issues in older ML packages
+numpy
+Pillow
+scikit-image
