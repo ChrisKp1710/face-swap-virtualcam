@@ -29,9 +29,16 @@ class CaptureThread(threading.Thread):
     def run(self):
         logger.info(f"Avviando CaptureThread. Cerco la webcam fisica...")
         
-        # Testiamo dinamicamente più ID (0, 1, 2) per trovare quella reale
-        # L'ID 0 potrebbe essere occupato o assegnato ad una virtual cam fantasma.
+        # Testiamo dinamicamente più ID. Diamo priorità a MSMF (Media Foundation), 
+        # che è lo standard moderno di Windows 10/11 usato da Discord e fotocamera nativa.
+        # DirectShow (DSHOW) è roba vecchia e su molte cam causa enormi lag.
         for test_id in [self.cam_id, 0, 1, 2]:
+            self.cap = cv2.VideoCapture(test_id, cv2.CAP_MSMF)
+            if self.cap.isOpened():
+                logger.info(f"SUCCESS: Webcam trovata all'ID {test_id} (MSMF/Nativo Windows)")
+                break
+            
+            # Fallback DSHOW
             self.cap = cv2.VideoCapture(test_id, cv2.CAP_DSHOW)
             if self.cap.isOpened():
                 logger.info(f"SUCCESS: Webcam trovata all'ID {test_id} (DirectShow)")
@@ -48,9 +55,13 @@ class CaptureThread(threading.Thread):
             self.running = False
             return
             
-        # Forza la risoluzione e ottimizza a zero-lag le cache interne
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.config.get("virtual_cam_width", 1280))
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.config.get("virtual_cam_height", 720))
+        # Ottimizziamo MJPG per svuotare il cavo USB
+        self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+        
+        # RIMOSSO il force Width/Height: molte webcam moderne rallentano enormemente
+        # se costrette a risoluzioni non primarie, perché attivano scaler lenti interni.
+        # Ci penserà l'OutputThread a fare il resize usando il processore (fulmineo).
+        
         self.cap.set(cv2.CAP_PROP_FPS, self.fps_target)
         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Kills the lag by limiting internal queue to 1 frame
 
