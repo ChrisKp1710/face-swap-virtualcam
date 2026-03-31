@@ -54,7 +54,6 @@ class OutputThread(threading.Thread):
                                 
                             # MANDA A OBS / DISCORD ecc.
                             cam.send(rgb_frame)
-                            cam.sleep_until_next_frame()
                             
                             # MANDA LA COPIA PICCOLA ALLA GUI PER IL PREVIEW (a basso overhead)
                             if self.ui_callback:
