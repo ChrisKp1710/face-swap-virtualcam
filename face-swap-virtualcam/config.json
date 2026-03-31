@@ -1,14 +1,18 @@
 {
   "models_dir": "models",
-  "providers": ["DmlExecutionProvider", "CPUExecutionProvider"],
   "webcam_id": 0,
   "virtual_cam_width": 1280,
   "virtual_cam_height": 720,
   "virtual_cam_fps": 30,
-  "ui_theme": "dark",
-  "ui_color": "blue",
-  "face_enhancement_weight": 0.5,
+  "providers": [
+    "DmlExecutionProvider",
+    "CPUExecutionProvider"
+  ],
+  "active_provider": "CPUExecutionProvider",
+  "face_enhancement_weight": 0.83,
   "enable_enhancement": true,
   "enable_color_transfer": true,
-  "enable_temporal_smoothing": true
+  "enable_temporal_smoothing": true,
+  "ui_theme": "dark",
+  "ui_color": "blue"
 }

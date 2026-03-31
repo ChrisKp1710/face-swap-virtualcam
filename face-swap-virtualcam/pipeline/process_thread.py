@@ -2,21 +2,28 @@ import threading
 import queue
 import time
 import logging
-import cv2
+from typing import Optional
+import numpy as np
+from core.config import AppConfig
 
 logger = logging.getLogger("ProcessThread")
 
 class ProcessThread(threading.Thread):
-    def __init__(self, config, input_queue: queue.Queue, output_queue: queue.Queue):
-        super().__init__(daemon=True)
+    def __init__(self, config: AppConfig, input_queue: queue.Queue, output_queue: queue.Queue):
+        super().__init__(daemon=True, name="ProcessThread")
         self.config = config
         self.input_queue = input_queue
         self.output_queue = output_queue
         self.running = False
         self.effect_enabled = False
         
-        # [Placeholder per motori ONNX (InsightFace e CodeFormer) - Fase 4 e 4.5]
-        self.face_swapper = None 
+        # Performance Tracking
+        self.fps = 0.0
+        self.frame_times = []
+        
+        # AI Engine Placeholders
+        self.face_analyzer = None 
+        self.face_swapper = None
         self.face_enhancer = None
 
     def start_process(self):
@@ -28,39 +35,49 @@ class ProcessThread(threading.Thread):
 
     def toggle_effect(self, state: bool):
         self.effect_enabled = state
-        logger.info(f"Effetto Face-Swap impostato a: {state}")
+        logger.info(f"Effetto Face-Swap {'ATTIVATO' if state else 'DISATTIVATO'}")
 
     def run(self):
-        logger.info("Avviando ProcessThread per inferenza AI")
+        logger.info("Motore di elaborazione avviato.")
+        last_fps_update = time.time()
+        
         while self.running:
             try:
-                # Prende l'ultimo frame dalla telecamera (Timeout corto evita stalli thread-freeze)
+                # Prende l'ultimo frame con un timeout corto
+                start_time = time.time()
                 frame = self.input_queue.get(timeout=0.1)
                 
-                # SE L'EFFETTO È DISATTIVATO O SORGENTE MANCANTE -> Passa l'immagine originale
+                # --- CORE LOGIC START ---
                 if not self.effect_enabled:
                     processed_frame = frame.copy()
                 else:
-                    # ---> FASE 4 START: Qui implementeremo il Core AI (Detection -> Swap -> Enhance)
-                    
-                    # (Placeholder temporaneo in attesa dell'integrazione InsightFace/DirectML)
-                    # es: processed_frame = self.face_swapper.swap(frame, source_face)
-                    
-                    # Momentaneamente solo una copia
+                    # In futuro qui chiameremo:
+                    # processed_frame = self.face_swapper.process(frame)
                     processed_frame = frame.copy()
-                    
-                # Scartiamo output vecchi per mantenere lo streaming in tempo reale perfetto
+                # --- CORE LOGIC END ---
+
+                # Calcolo FPS (Media mobile su 30 frame)
+                self.frame_times.append(time.time() - start_time)
+                if len(self.frame_times) > 30:
+                    self.frame_times.pop(0)
+                
+                if time.time() - last_fps_update > 1.0:
+                    self.fps = 1.0 / (sum(self.frame_times) / len(self.frame_times)) if self.frame_times else 0
+                    logger.debug(f"AI Performance: {self.fps:.2f} FPS")
+                    last_fps_update = time.time()
+
+                # Gestione coda output (LIFO)
                 if self.output_queue.full():
                     try:
                         self.output_queue.get_nowait()
                     except queue.Empty:
                         pass
-                        
+                
                 self.output_queue.put(processed_frame)
 
             except queue.Empty:
-                pass
+                continue
             except Exception as e:
-                logger.error(f"Errore gravissimo nel loop AI: {e}", exc_info=True)
+                logger.error(f"Errore critico loop AI: {e}", exc_info=True)
 
-        logger.info("ProcessThread arrestato.")
+        logger.info("ProcessThread terminato correttamente.")

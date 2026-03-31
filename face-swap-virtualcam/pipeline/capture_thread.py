@@ -3,16 +3,15 @@ import threading
 import queue
 import time
 import logging
+from core.config import AppConfig
 
 logger = logging.getLogger("CaptureThread")
 
 class CaptureThread(threading.Thread):
-    def __init__(self, config, output_queue: queue.Queue):
-        super().__init__(daemon=True)
+    def __init__(self, config: AppConfig, output_queue: queue.Queue):
+        super().__init__(daemon=True, name="CaptureThread")
         self.config = config
         self.output_queue = output_queue
-        self.cam_id = self.config.get("webcam_id", 0)
-        self.fps_target = self.config.get("virtual_cam_fps", 30)
         self.running = False
         self.cap = None
 
@@ -22,66 +21,61 @@ class CaptureThread(threading.Thread):
 
     def stop_capture(self):
         self.running = False
-        # IMPORTANTE: Su Windows non fare MAI cap.release() dal main thread,
-        # altrimenti causa deadlock di 3 secondi o crash se il thread bkg sta leggendo.
-        # Lasciamo che sia il run() a chiuderlo uscendo dal ciclo while.
+
+    def _initialize_camera(self) -> bool:
+        """Prova a inizializzare la webcam con diversi backend, dando priorità a MSMF."""
+        # Backend da testare in ordine di modernità/performance su Windows
+        backends = [
+            (cv2.CAP_MSMF, "Media Foundation (Nativo)"),
+            (cv2.CAP_DSHOW, "DirectShow (Legacy)"),
+            (None, "Default")
+        ]
+        
+        # Prova prima l'ID preferito, poi quelli standard
+        for cam_id in [self.config.webcam_id, 0, 1, 2]:
+            for backend, name in backends:
+                try:
+                    if backend is not None:
+                        self.cap = cv2.VideoCapture(cam_id, backend)
+                    else:
+                        self.cap = cv2.VideoCapture(cam_id)
+                        
+                    if self.cap and self.cap.isOpened():
+                        logger.info(f"Webcam trovata: ID {cam_id} via {name}")
+                        return True
+                except Exception as e:
+                    logger.debug(f"Fallito test ID {cam_id} con {name}: {e}")
+        return False
 
     def run(self):
-        logger.info(f"Avviando CaptureThread. Cerco la webcam fisica...")
-        
-        # Testiamo dinamicamente più ID. Diamo priorità a MSMF (Media Foundation), 
-        # che è lo standard moderno di Windows 10/11 usato da Discord e fotocamera nativa.
-        # DirectShow (DSHOW) è roba vecchia e su molte cam causa enormi lag.
-        for test_id in [self.cam_id, 0, 1, 2]:
-            self.cap = cv2.VideoCapture(test_id, cv2.CAP_MSMF)
-            if self.cap.isOpened():
-                logger.info(f"SUCCESS: Webcam trovata all'ID {test_id} (MSMF/Nativo Windows)")
-                break
-            
-            # Fallback DSHOW
-            self.cap = cv2.VideoCapture(test_id, cv2.CAP_DSHOW)
-            if self.cap.isOpened():
-                logger.info(f"SUCCESS: Webcam trovata all'ID {test_id} (DirectShow)")
-                break
-            
-            # Fallback MSMF
-            self.cap = cv2.VideoCapture(test_id)
-            if self.cap.isOpened():
-                logger.info(f"SUCCESS: Webcam trovata all'ID {test_id} (Base)")
-                break
-
-        if not self.cap or not self.cap.isOpened():
-            logger.error("Impossibile aprire NESSUNA webcam! Controlla i permessi di Windows o riavvia.")
+        if not self._initialize_camera():
+            logger.error("Impossibile aprire alcuna webcam.")
             self.running = False
             return
-            
-        # Ottimizziamo MJPG per svuotare il cavo USB
+
+        # Configurazione hardware veloce (MJPG riduce la banda USB e la latenza)
         self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
-        
-        # RIMOSSO il force Width/Height: molte webcam moderne rallentano enormemente
-        # se costrette a risoluzioni non primarie, perché attivano scaler lenti interni.
-        # Ci penserà l'OutputThread a fare il resize usando il processore (fulmineo).
-        
-        self.cap.set(cv2.CAP_PROP_FPS, self.fps_target)
-        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Kills the lag by limiting internal queue to 1 frame
+        self.cap.set(cv2.CAP_PROP_FPS, self.config.virtual_cam_fps)
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1) # Fondamentale per eliminare il lag
+
+        logger.info(f"Streaming avviato a {self.config.virtual_cam_fps} FPS")
 
         while self.running:
             ret, frame = self.cap.read()
-            
-            if ret:
-                # Svuota buffer vecchio se pieno per non avere lag (LIFO effect)
-                if self.output_queue.full():
-                    try:
-                        self.output_queue.get_nowait()
-                    except queue.Empty:
-                        pass
-                
-                self.output_queue.put(frame)
-            else:
-                logger.warning("Frame perso durante la lettura della webcam")
+            if not ret or frame is None:
+                logger.warning("Frame nullo o errore lettura webcam")
                 time.sleep(0.01)
-
-        if self.cap and self.cap.isOpened():
-            self.cap.release()
+                continue
             
-        logger.info("CaptureThread arrestato con successo.")
+            # Svuota buffer se pieno (LIFO pattern)
+            if self.output_queue.full():
+                try:
+                    self.output_queue.get_nowait()
+                except queue.Empty:
+                    pass
+            
+            self.output_queue.put(frame)
+
+        if self.cap:
+            self.cap.release()
+        logger.info("CaptureThread terminato correttamente.")

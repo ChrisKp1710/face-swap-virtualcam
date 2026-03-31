@@ -3,11 +3,12 @@ import logging
 from PIL import Image, ImageTk
 import numpy as np
 import cv2
+from core.config import AppConfig
 
 logger = logging.getLogger("PreviewPanel")
 
 class PreviewPanel(ctk.CTkFrame):
-    def __init__(self, master, config):
+    def __init__(self, master, config: AppConfig):
         super().__init__(master)
         self.config = config
         
@@ -15,7 +16,13 @@ class PreviewPanel(ctk.CTkFrame):
         self.grid_rowconfigure(1, weight=1)
         self.grid_columnconfigure(0, weight=1)
         
-        self.lbl_title = ctk.CTkLabel(self, text="Monitor Live", font=ctk.CTkFont(size=20, weight="bold"))
+        # Header professionale
+        self.lbl_title = ctk.CTkLabel(
+            self, 
+            text="AI LIVE MONITOR", 
+            font=ctk.CTkFont(size=16, weight="bold"),
+            text_color="#3B8ED0"
+        )
         self.lbl_title.grid(row=0, column=0, pady=(10, 0), sticky="n")
         
         self.preview_container = ctk.CTkFrame(self, fg_color="transparent")
@@ -26,47 +33,52 @@ class PreviewPanel(ctk.CTkFrame):
         self.preview_container.grid_columnconfigure(1, weight=1)
         
         # CAMERA (Frame Sinistro)
-        self.frame_camera = ctk.CTkFrame(self.preview_container)
+        self.frame_camera = ctk.CTkFrame(self.preview_container, border_width=2, border_color="#333333")
         self.frame_camera.grid(row=0, column=0, padx=5, sticky="nsew")
         
-        self.lbl_camera = ctk.CTkLabel(self.frame_camera, text="[Webcam Offline]")
+        self.lbl_camera = ctk.CTkLabel(self.frame_camera, text="Webcam Offline", text_color="gray")
         self.lbl_camera.pack(expand=True, fill="both")
         
         # SORGENTE (Frame Destro)
-        self.frame_source = ctk.CTkFrame(self.preview_container)
+        self.frame_source = ctk.CTkFrame(self.preview_container, border_width=2, border_color="#333333")
         self.frame_source.grid(row=0, column=1, padx=5, sticky="nsew")
         
-        self.lbl_source = ctk.CTkLabel(self.frame_source, text="[Foto Sorgente Vuota]")
+        self.lbl_source = ctk.CTkLabel(self.frame_source, text="Target Face Not Set", text_color="gray")
         self.lbl_source.pack(expand=True, fill="both")
         
-        self.current_cam_image = None
-        self.current_source_image = None
+        # Cache per le immagini (Evita il Garbage Collection aggressivo di Tkinter)
+        self._tk_cam_image = None
+        self._tk_source_image = None
 
-    def update_camera_frame(self, rgb_ndarray):
-        # Riceviamo frame RGB numpy convertiti da OpenCV
+    def update_camera_frame(self, rgb_array: np.ndarray):
+        """Riceve un frame RGB e lo renderizza nel widget correggendo l'aspect ratio."""
         try:
-            h, w, c = rgb_ndarray.shape
+            # Ottieni dimensioni del widget per il resize
+            w = self.frame_camera.winfo_width()
+            h = self.frame_camera.winfo_height()
             
-            # Mantieni form-factor adattandolo al widget in real-time
-            widget_w = self.frame_camera.winfo_width()
-            widget_h = self.frame_camera.winfo_height()
+            if w < 10 or h < 10: return
+
+            # Resize iper-veloce in OpenCV
+            resized = cv2.resize(rgb_array, (w, h), interpolation=cv2.INTER_LINEAR)
             
-            if widget_w <= 1 or widget_h <= 1: 
-                return
-                
-            # 1. Resize velocissimo in C++ con OpenCV (Rilascia il GIL per far respirare i thread)
-            resized_array = cv2.resize(rgb_ndarray, (widget_w, widget_h), interpolation=cv2.INTER_LINEAR)
-            img = Image.fromarray(resized_array)
+            # Conversione PIL -> ImageTk (Metodo più veloce per Tkinter)
+            img = Image.fromarray(resized)
+            self._tk_cam_image = ImageTk.PhotoImage(image=img)
             
-            # 2. Utilizzo nativo di ImageTk (aggira il pesantissimo wrapping di CTkImage)
-            self.current_cam_image = ImageTk.PhotoImage(image=img)
-            self.lbl_camera.configure(image=self.current_cam_image, text="")
+            self.lbl_camera.configure(image=self._tk_cam_image, text="")
         except Exception as e:
-            logger.error(f"Errore UI Render: {e}")
+            logger.error(f"UI Camera Render Error: {e}")
 
     def update_source_frame(self, pil_image: Image.Image):
+        """Aggiorna la miniatura della faccia target a destra."""
         try:
-            self.current_source_image = ctk.CTkImage(light_image=pil_image, dark_image=pil_image, size=(250, 250))
-            self.lbl_source.configure(image=self.current_source_image, text="")
+            # Usiamo CTkImage qui perché è una statica, non deve girare a 30fps
+            self._tk_source_image = ctk.CTkImage(
+                light_image=pil_image, 
+                dark_image=pil_image, 
+                size=(300, 300)
+            )
+            self.lbl_source.configure(image=self._tk_source_image, text="")
         except Exception as e:
-            logger.error(f"Errore caricamento miniatura: {e}")
+            logger.error(f"UI Source Render Error: {e}")
