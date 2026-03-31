@@ -1,7 +1,8 @@
 import customtkinter as ctk
 import logging
-from PIL import Image
+from PIL import Image, ImageTk
 import numpy as np
+import cv2
 
 logger = logging.getLogger("PreviewPanel")
 
@@ -53,10 +54,12 @@ class PreviewPanel(ctk.CTkFrame):
             if widget_w <= 1 or widget_h <= 1: 
                 return
                 
-            img = Image.fromarray(rgb_ndarray)
+            # 1. Resize velocissimo in C++ con OpenCV (Rilascia il GIL per far respirare i thread)
+            resized_array = cv2.resize(rgb_ndarray, (widget_w, widget_h), interpolation=cv2.INTER_LINEAR)
+            img = Image.fromarray(resized_array)
             
-            # Non usiamo thumbnail ma un CTkImage col size dinamico
-            self.current_cam_image = ctk.CTkImage(light_image=img, dark_image=img, size=(widget_w, widget_h))
+            # 2. Utilizzo nativo di ImageTk (aggira il pesantissimo wrapping di CTkImage)
+            self.current_cam_image = ImageTk.PhotoImage(image=img)
             self.lbl_camera.configure(image=self.current_cam_image, text="")
         except Exception as e:
             logger.error(f"Errore UI Render: {e}")

@@ -41,22 +41,24 @@ class OutputThread(threading.Thread):
             with pyvirtualcam.Camera(width=self.width, height=self.height, fps=self.fps) as cam:
                 logger.info(f"Costruito Virtual Camera stream: {cam.device}")
                 
+                frame_count = 0
                 while self.running:
                     try:
                         frame = self.result_queue.get(timeout=0.1)
                         
                         # RGB needed per VirtualCam e GUI PIL
                         if frame is not None:
+                            frame_count += 1
                             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                             
                             if (rgb_frame.shape[1] != self.width) or (rgb_frame.shape[0] != self.height):
                                 rgb_frame = cv2.resize(rgb_frame, (self.width, self.height))
                                 
-                            # MANDA A OBS / DISCORD ecc.
+                            # MANDA A OBS / DISCORD ecc. FULL 30 FPS
                             cam.send(rgb_frame)
                             
-                            # MANDA LA COPIA PICCOLA ALLA GUI PER IL PREVIEW (a basso overhead)
-                            if self.ui_callback:
+                            # MANDA LA COPIA PICCOLA ALLA GUI PER IL PREVIEW a 15 FPS (evita lag su Tkinter)
+                            if self.ui_callback and frame_count % 2 == 0:
                                 self.ui_callback(rgb_frame)
                                 
                     except queue.Empty:

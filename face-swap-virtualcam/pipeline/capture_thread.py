@@ -48,10 +48,11 @@ class CaptureThread(threading.Thread):
             self.running = False
             return
             
-        # Forza la risoluzione (molte webcam potrebbero non rispettarla nativamente)
+        # Forza la risoluzione e ottimizza a zero-lag le cache interne
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.config.get("virtual_cam_width", 1280))
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.config.get("virtual_cam_height", 720))
         self.cap.set(cv2.CAP_PROP_FPS, self.fps_target)
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Kills the lag by limiting internal queue to 1 frame
 
         while self.running:
             ret, frame = self.cap.read()
