@@ -1,6 +1,6 @@
 import customtkinter as ctk
 import logging
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageOps
 import numpy as np
 import cv2
 from core.config import AppConfig
@@ -9,104 +9,87 @@ logger = logging.getLogger("PreviewPanel")
 
 class PreviewPanel(ctk.CTkFrame):
     def __init__(self, master, config: AppConfig):
-        super().__init__(master)
+        super().__init__(master, fg_color="transparent")
         self.config = config
         
-        self.grid_rowconfigure(0, weight=0)
-        self.grid_rowconfigure(1, weight=1)
+        self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
         
-        # Header professionale
-        self.lbl_title = ctk.CTkLabel(
-            self, 
-            text="REAL-TIME AI PROCESSING ENGINE", 
-            font=ctk.CTkFont(size=14, weight="bold"),
+        # Container principale asimmetrico
+        self.main_container = ctk.CTkFrame(self, fg_color="transparent")
+        self.main_container.grid(row=0, column=0, sticky="nsew")
+        
+        # LAYOUT RIGIDO: 60% | 10% | 30%
+        self.main_container.grid_rowconfigure(0, weight=1)
+        self.main_container.grid_columnconfigure(0, weight=60, uniform="preview_group") 
+        self.main_container.grid_columnconfigure(1, weight=10, uniform="preview_group")
+        self.main_container.grid_columnconfigure(2, weight=30, uniform="preview_group")
+        
+        # 1. CARD WEBCAM (MASTER)
+        # Impostiamo width/height minimi ma blocchiamo la propagazione
+        self.cam_card = ctk.CTkFrame(self.main_container, corner_radius=30, fg_color="#1A1A1A", border_width=2, border_color="#2B2B2B")
+        self.cam_card.grid(row=0, column=0, sticky="nsew", padx=(20, 10), pady=40)
+        self.cam_card.pack_propagate(False) # <--- FONDAMENTALE: La card NON si espande per l'immagine
+        
+        self.lbl_camera = ctk.CTkLabel(self.cam_card, text="")
+        self.lbl_camera.pack(expand=True, fill="both")
+        
+        # 2. INDICATORE
+        self.flow_indicator = ctk.CTkLabel(
+            self.main_container, 
+            text="→", 
+            font=ctk.CTkFont(size=45, weight="bold"), 
             text_color="#3B8ED0"
         )
-        self.lbl_title.grid(row=0, column=0, pady=(10, 5), sticky="n")
+        self.flow_indicator.grid(row=0, column=1)
         
-        # Container principale con 3 colonne parallele
-        self.preview_container = ctk.CTkFrame(self, fg_color="transparent")
-        self.preview_container.grid(row=1, column=0, sticky="nsew", padx=15, pady=(0, 15))
+        # 3. CARD SOURCE (MASTER)
+        self.source_card = ctk.CTkFrame(self.main_container, corner_radius=30, fg_color="#1A1A1A", border_width=2, border_color="#2B2B2B")
+        self.source_card.grid(row=0, column=2, sticky="nsew", padx=(10, 20), pady=80)
+        self.source_card.pack_propagate(False) # <--- FONDAMENTALE: La card resta della dimensione decisa dalla griglia
         
-        self.preview_container.grid_rowconfigure(0, weight=1)
-        self.preview_container.grid_columnconfigure(0, weight=45) # CAM
-        self.preview_container.grid_columnconfigure(1, weight=10) # ARROW
-        self.preview_container.grid_columnconfigure(2, weight=45) # SOURCE
+        self.lbl_source = ctk.CTkLabel(self.source_card, text="")
+        self.lbl_source.pack(expand=True, fill="both")
         
-        # 1. CAMERA CONTAINER (Identico al source)
-        self.frame_camera = ctk.CTkFrame(self.preview_container, border_width=2, border_color="#1f538d", fg_color="#111111")
-        self.frame_camera.grid(row=0, column=0, sticky="nsew")
-        
-        self.lbl_camera = ctk.CTkLabel(self.frame_camera, text="Webcam Off", text_color="#555555")
-        self.lbl_camera.pack(expand=True, fill="both", padx=2, pady=2)
-        
-        # 2. FRECCIA CENTRALE (Visual flow indicator)
-        self.arrow_container = ctk.CTkFrame(self.preview_container, fg_color="transparent")
-        self.arrow_container.grid(row=0, column=1, sticky="nsew")
-        self.lbl_arrow = ctk.CTkLabel(self.arrow_container, text="➜", font=ctk.CTkFont(size=40, weight="bold"), text_color="#3B8ED0")
-        self.lbl_arrow.pack(expand=True)
-        
-        # 3. SOURCE CONTAINER (Identico alla cam)
-        self.frame_source = ctk.CTkFrame(self.preview_container, border_width=2, border_color="#1f538d", fg_color="#111111")
-        self.frame_source.grid(row=0, column=2, sticky="nsew")
-        
-        self.lbl_source = ctk.CTkLabel(self.frame_source, text="No Target Face", text_color="#555555")
-        self.lbl_source.pack(expand=True, fill="both", padx=2, pady=2)
-        
-        # Cache oggetti CTkImage per evitare lag di instanziamento continuo
         self._ctk_cam_img = None
         self._ctk_source_img = None
 
+    def _smart_crop_resize(self, pil_img: Image.Image, target_w: int, target_h: int) -> Image.Image:
+        """Ritaglio centrale per riempire lo spazio assegnato."""
+        # Se il widget è appena stato creato, potrebbe avere dimensioni 1x1
+        if target_w < 10 or target_h < 10: return pil_img
+        return ImageOps.fit(pil_img, (target_w, target_h), method=Image.Resampling.LANCZOS)
+
     def update_camera_frame(self, rgb_array: np.ndarray):
-        """Renderizza il frame mantenendo le proporzioni (Letterboxing)."""
+        """Si adatta alla dimensione della Card senza mai allargarla."""
         try:
-            # Dimensioni widget target
-            w_target = self.frame_camera.winfo_width() - 4
-            h_target = self.frame_camera.winfo_height() - 4
-            if w_target < 10 or h_target < 10: return
-
-            # Calcolo proporzioni originali (1920/1080 = 1.77)
-            h_orig, w_orig = rgb_array.shape[:2]
-            aspect_orig = w_orig / h_orig
-            aspect_target = w_target / h_target
-
-            # Ridimensionamento proporzionale (Letterbox intelligente)
-            if aspect_orig > aspect_target: # Più larga del widget
-                w_new = w_target
-                h_new = int(w_target / aspect_orig)
-            else: # Più stretta del widget
-                h_new = h_target
-                w_new = int(h_target * aspect_orig)
-
-            # Resize OpenCV (velocissimo)
-            resized = cv2.resize(rgb_array, (w_new, h_new), interpolation=cv2.INTER_LINEAR)
+            # Prende la dimensione REALE che la griglia ha dato alla card
+            w_target = self.cam_card.winfo_width() - 4 # Sottraiamo bordi
+            h_target = self.cam_card.winfo_height() - 4
             
-            # Conversione PIL
-            pil_img = Image.fromarray(resized)
+            if w_target < 50: return
+
+            pil_img = Image.fromarray(rgb_array)
+            filled_img = self._smart_crop_resize(pil_img, w_target, h_target)
             
-            # Aggiornamento CTkImage senza ricreare l'oggetto se possibile (Fix Warning HighDPI)
-            # Nota: CTkLabel accetta CTkImage per supportare il ridimensionamento HighDPI nativo
-            self._ctk_cam_img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(w_new, h_new))
-            self.lbl_camera.configure(image=self._ctk_cam_img, text="")
+            # Crea l'immagine della dimensione ESATTA della card
+            self._ctk_cam_img = ctk.CTkImage(light_image=filled_img, dark_image=filled_img, size=(w_target, h_target))
+            self.lbl_camera.configure(image=self._ctk_cam_img)
             
         except Exception as e:
-            logger.error(f"UI Camera Render Error: {e}")
+            logger.error(f"UI Cam Resize Error: {e}")
 
     def update_source_frame(self, pil_image: Image.Image):
-        """Aggiorna la miniatura della faccia target mantenendo l'aspetto."""
+        """Si adatta alla dimensione della Card Source."""
         try:
-            w_target = self.frame_source.winfo_width() - 10
-            h_target = self.frame_source.winfo_height() - 10
+            w_target = self.source_card.winfo_width() - 4
+            h_target = self.source_card.winfo_height() - 4
             
-            # Anche qui facciamo un resize intelligente
-            pil_image.thumbnail((w_target, h_target), Image.Resampling.LANCZOS)
+            if w_target < 50: return
+
+            filled_img = self._smart_crop_resize(pil_image, w_target, h_target)
             
-            self._ctk_source_img = ctk.CTkImage(
-                light_image=pil_image, 
-                dark_image=pil_image, 
-                size=(pil_image.width, pil_image.height)
-            )
-            self.lbl_source.configure(image=self._ctk_source_img, text="")
+            self._ctk_source_img = ctk.CTkImage(light_image=filled_img, dark_image=filled_img, size=(w_target, h_target))
+            self.lbl_source.configure(image=self._ctk_source_img)
         except Exception as e:
-            logger.error(f"UI Source Render Error: {e}")
+            logger.error(f"UI Source Resize Error: {e}")
